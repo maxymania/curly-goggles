@@ -24,9 +24,12 @@ package cluster
 
 import "github.com/maxymania/curly-goggles/hashcrown"
 import "github.com/hashicorp/memberlist"
+import "github.com/valyala/gorpc"
 import "github.com/vmihailenco/msgpack"
 import "sync"
 import "fmt"
+import "bytes"
+import "net"
 
 type ClusterNode struct{
 	_msgpack struct{} `msgpack:",asArray"`
@@ -38,6 +41,13 @@ type ClusterNode struct{
 type remoteNode struct{
 	*ClusterNode
 	Name string
+	Rpc  *gorpc.Client
+}
+type NodeMap map[string]*remoteNode
+
+// Return a simple answer!
+func emptyHandler(clientAddr string, request interface{}) (response interface{}) {
+	return false
 }
 
 type ClusterElement struct{
@@ -45,9 +55,26 @@ type ClusterElement struct{
 	Ring    *hashcrown.NodeRing
 	Local   *ClusterNode
 	
+	Handler gorpc.HandlerFunc
+	Server  *gorpc.Server
+	
 	mutex sync.Mutex
-	NodeMap map[string]*remoteNode
+	NodeMap NodeMap
 }
+func (c *ClusterElement) Initialize(nodeID []byte, RpcPort int) {
+	c.NodeMap = make(NodeMap)
+	if c.Handler==nil { c.Handler = emptyHandler }
+	c.Local = &ClusterNode{
+		Marker  : c.Marker,
+		RpcPort : RpcPort,
+		NodeId  : nodeID,
+	}
+	c.Ring = hashcrown.NewNodeRing()
+	
+	c.Server = gorpc.NewTCPServer(fmt.Sprintf(":%d",c.Local.RpcPort), c.Handler)
+	c.Server.Start()
+}
+
 
 func (c *ClusterElement) NodeMeta(limit int) []byte {
 	data,_ := msgpack.Marshal(c.Local)
@@ -65,6 +92,13 @@ func (c *ClusterElement) decode(n *memberlist.Node) *remoteNode {
 	rn := new(remoteNode)
 	rn.ClusterNode = cn
 	rn.Name = n.Name
+	
+	// Node is a remote node!!!
+	if cn.RpcPort>0 && !bytes.Equal(rn.NodeId,c.Local.NodeId) {
+		ta := &net.TCPAddr{IP:n.Addr,Port:cn.RpcPort}
+		rn.Rpc = gorpc.NewTCPClient(ta.String())
+	}
+	
 	return rn
 }
 func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
@@ -75,7 +109,11 @@ func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
 	c.NodeMap[rn.Name] = rn
 	c.mutex.Unlock()
 	
-	c.Ring.AddNode(hashcrown.NewBinary(rn.NodeId),rn)
+	if bytes.Equal(rn.NodeId,c.Local.NodeId) {
+		c.Ring.SetLocalNode(hashcrown.NewBinary(rn.NodeId),rn)
+	} else {
+		c.Ring.AddNode(hashcrown.NewBinary(rn.NodeId),rn)
+	}
 }
 func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 	c.mutex.Lock()
@@ -84,6 +122,7 @@ func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 		c.mutex.Unlock()
 		return
 	}
+	delete(c.NodeMap,n.Name)
 	c.mutex.Unlock()
 	c.Ring.RemoveNode(hashcrown.NewBinary(rn.NodeId))
 }

@@ -49,5 +49,9 @@ func (q *Query) ApplyTo(tree *btree.BTree) {
 	tree.AscendGreaterOrEqual(q.Key,q.consume)
 	tree.AscendLessThan(q.Key,q.consume)
 }
-
+// Performs [key+1...last] || [first...key] backwards.
+func (q *Query) ApplyReverseTo(tree *btree.BTree) {
+	tree.DescendLessOrEqual(q.Key,q.consume)
+	tree.DescendGreaterThan(q.Key,q.consume)
+}
 

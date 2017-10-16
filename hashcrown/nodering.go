@@ -91,4 +91,17 @@ func (nr *NodeRing) GetTargetObj(keyObj *Node, dst []*Node) []*Node {
 func (nr *NodeRing) GetTarget(key Binary, dst []*Node) []*Node {
 	return nr.GetTargetObj(&Node{key.Md5(),true,nil},dst)
 }
+func (nr *NodeRing) GetLocalAndPrevious(keyObj *Node, dst []*Node) []*Node {
+	if nr.local == nil { return nil }
+	nr.mutex.RLock() ; defer nr.mutex.RUnlock()
+	/*
+	We are going to Descend-query [nr.local,previous1,prevoius2,...]
+	*/
+	q := &Query{nr.local,make([]btree.Item,0,len(dst)),len(dst)}
+	q.ApplyReverseTo(nr.tree)
+	dst = dst[:len(q.Values)]
+	for i,v := range q.Values { dst[i] = v.(*Node) }
+	return dst
+}
+
 
