@@ -43,7 +43,7 @@ type remoteNode struct{
 	Name string
 	Rpc  *gorpc.Client
 }
-type NodeMap map[string]*remoteNode
+type nodeMap map[string]*remoteNode
 
 // Return a simple answer!
 func emptyHandler(clientAddr string, request interface{}) (response interface{}) {
@@ -59,10 +59,10 @@ type ClusterElement struct{
 	Server  *gorpc.Server
 	
 	mutex sync.Mutex
-	NodeMap NodeMap
+	nodeMap nodeMap
 }
 func (c *ClusterElement) Initialize(nodeID []byte, RpcPort int) {
-	c.NodeMap = make(NodeMap)
+	c.nodeMap = make(nodeMap)
 	if c.Handler==nil { c.Handler = emptyHandler }
 	c.Local = &ClusterNode{
 		Marker  : c.Marker,
@@ -106,7 +106,7 @@ func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
 	if rn==nil { return }
 	
 	c.mutex.Lock()
-	c.NodeMap[rn.Name] = rn
+	c.nodeMap[rn.Name] = rn
 	c.mutex.Unlock()
 	
 	if bytes.Equal(rn.NodeId,c.Local.NodeId) {
@@ -117,12 +117,12 @@ func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
 }
 func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 	c.mutex.Lock()
-	rn,ok := c.NodeMap[n.Name]
+	rn,ok := c.nodeMap[n.Name]
 	if !ok {
 		c.mutex.Unlock()
 		return
 	}
-	delete(c.NodeMap,n.Name)
+	delete(c.nodeMap,n.Name)
 	c.mutex.Unlock()
 	c.Ring.RemoveNode(hashcrown.NewBinary(rn.NodeId))
 }
