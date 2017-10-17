@@ -85,7 +85,7 @@ func (c *ClusterElement) NotifyMsg([]byte) {}
 func (c *ClusterElement) GetBroadcasts(overhead, limit int) [][]byte { return nil }
 func (c *ClusterElement) LocalState(join bool) []byte { return nil }
 func (c *ClusterElement) MergeRemoteState(buf []byte, join bool) { }
-func (c *ClusterElement) decode(n *memberlist.Node) *remoteNode {
+func (c *ClusterElement) decode(n *memberlist.Node,real bool) *remoteNode {
 	cn := new(ClusterNode)
 	if msgpack.Unmarshal(n.Meta,cn)!=nil { return nil }
 	if cn.Marker!=c.Marker { return nil }
@@ -94,7 +94,7 @@ func (c *ClusterElement) decode(n *memberlist.Node) *remoteNode {
 	rn.Name = n.Name
 	
 	// Node is a remote node!!!
-	if cn.RpcPort>0 && !bytes.Equal(rn.NodeId,c.Local.NodeId) {
+	if real && cn.RpcPort>0 && !bytes.Equal(rn.NodeId,c.Local.NodeId) {
 		ta := &net.TCPAddr{IP:n.Addr,Port:cn.RpcPort}
 		rn.Rpc = gorpc.NewTCPClient(ta.String())
 	}
@@ -102,7 +102,7 @@ func (c *ClusterElement) decode(n *memberlist.Node) *remoteNode {
 	return rn
 }
 func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
-	rn := c.decode(n)
+	rn := c.decode(n,true)
 	if rn==nil { return }
 	
 	c.mutex.Lock()
@@ -128,14 +128,14 @@ func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 }
 func (c *ClusterElement) NotifyUpdate(n *memberlist.Node) {}
 func (c *ClusterElement) NotifyAlive(peer *memberlist.Node) error {
-	if c.decode(peer)==nil {
+	if c.decode(peer,false)==nil {
 		return fmt.Errorf("Invalid Nodes")
 	}
 	return nil
 }
 func (c *ClusterElement) NotifyMerge(peers []*memberlist.Node) error {
 	for _,peer := range peers {
-		if c.decode(peer)==nil {
+		if c.decode(peer,false)==nil {
 			return fmt.Errorf("Invalid Nodes")
 		}
 	}
