@@ -42,7 +42,18 @@ type remoteNode struct{
 	*ClusterNode
 	Name string
 	Rpc  *gorpc.Client
+	pos  int
 }
+
+func Extract(n *hashcrown.Node) (*ClusterNode,string,*gorpc.Client) {
+	rn := n.Further.(*remoteNode)
+	return rn.ClusterNode,rn.Name,rn.Rpc
+}
+func ExtractRaw(i interface{}) (*ClusterNode,string,*gorpc.Client) {
+	rn := i.(*remoteNode)
+	return rn.ClusterNode,rn.Name,rn.Rpc
+}
+
 type nodeMap map[string]*remoteNode
 
 // Return a simple answer!
@@ -60,6 +71,9 @@ type ClusterElement struct{
 	
 	mutex sync.Mutex
 	nodeMap nodeMap
+	
+	nlmux sync.Mutex
+	NodeList []interface{}
 }
 func (c *ClusterElement) Initialize(nodeID []byte, RpcPort int) {
 	c.nodeMap = make(nodeMap)
@@ -75,6 +89,26 @@ func (c *ClusterElement) Initialize(nodeID []byte, RpcPort int) {
 	c.Server.Start()
 }
 
+func (c *ClusterElement) listInsert(n *remoteNode) {
+	c.nlmux.Lock(); defer c.nlmux.Unlock()
+	i := len(c.NodeList)
+	c.NodeList = append(c.NodeList,n)
+	n.pos = i
+}
+
+func (c *ClusterElement) listRemove(n *remoteNode) {
+	c.nlmux.Lock(); defer c.nlmux.Unlock()
+	if n.pos<0 { return }
+	if n.pos>=len(c.NodeList) { return }
+	if c.NodeList[n.pos].(*remoteNode)!=n { return } // Safety first.
+	last := len(c.NodeList)-1
+	ln := c.NodeList[last].(*remoteNode)
+	ln.pos = n.pos
+	c.NodeList[ln.pos] = ln
+	c.NodeList = c.NodeList[:last]
+	
+	n.pos = -1
+}
 
 func (c *ClusterElement) NodeMeta(limit int) []byte {
 	data,_ := msgpack.Marshal(c.Local)
@@ -90,8 +124,9 @@ func (c *ClusterElement) decode(n *memberlist.Node,real bool) *remoteNode {
 	if msgpack.Unmarshal(n.Meta,cn)!=nil { return nil }
 	if cn.Marker!=c.Marker { return nil }
 	rn := new(remoteNode)
+	rn.pos         = -1
 	rn.ClusterNode = cn
-	rn.Name = n.Name
+	rn.Name        = n.Name
 	
 	// Node is a remote node!!!
 	if real && cn.RpcPort>0 && !bytes.Equal(rn.NodeId,c.Local.NodeId) {
@@ -114,6 +149,7 @@ func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
 	} else {
 		c.Ring.AddNode(hashcrown.NewBinary(rn.NodeId),rn)
 	}
+	c.listInsert(rn)
 }
 func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 	c.mutex.Lock()
@@ -125,6 +161,7 @@ func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 	delete(c.nodeMap,n.Name)
 	c.mutex.Unlock()
 	c.Ring.RemoveNode(hashcrown.NewBinary(rn.NodeId))
+	c.listRemove(rn)
 }
 func (c *ClusterElement) NotifyUpdate(n *memberlist.Node) {}
 func (c *ClusterElement) NotifyAlive(peer *memberlist.Node) error {
@@ -141,3 +178,4 @@ func (c *ClusterElement) NotifyMerge(peers []*memberlist.Node) error {
 	}
 	return nil
 }
+
