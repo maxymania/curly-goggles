@@ -132,6 +132,7 @@ func (c *ClusterElement) decode(n *memberlist.Node,real bool) *remoteNode {
 	if real && cn.RpcPort>0 && !bytes.Equal(rn.NodeId,c.Local.NodeId) {
 		ta := &net.TCPAddr{IP:n.Addr,Port:cn.RpcPort}
 		rn.Rpc = gorpc.NewTCPClient(ta.String())
+		rn.Rpc.Start()
 	}
 	
 	return rn
@@ -148,8 +149,9 @@ func (c *ClusterElement) NotifyJoin(n *memberlist.Node) {
 		c.Ring.SetLocalNode(hashcrown.NewBinary(rn.NodeId),rn)
 	} else {
 		c.Ring.AddNode(hashcrown.NewBinary(rn.NodeId),rn)
+		c.listInsert(rn)
 	}
-	c.listInsert(rn)
+	
 }
 func (c *ClusterElement) NotifyLeave(n *memberlist.Node) {
 	c.mutex.Lock()
